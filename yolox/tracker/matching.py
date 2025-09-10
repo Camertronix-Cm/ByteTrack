@@ -8,6 +8,19 @@ from cython_bbox import bbox_overlaps as bbox_ious
 from yolox.tracker import kalman_filter
 import time
 
+import torch
+import torch.nn.functional as F
+import torchvision.transforms as T
+
+# Preprocessing for crops
+preprocess = T.Compose([
+    T.ToPILImage(),
+    T.Resize((256, 128)),  # ReID input size
+    T.ToTensor(),
+    T.Normalize(mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225])
+])
+
 def merge_matches(m1, m2, shape):
     O,P,Q = shape
     m1 = np.asarray(m1)
@@ -58,13 +71,13 @@ def ious(atlbrs, btlbrs):
 
     :rtype ious np.ndarray
     """
-    ious = np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float)
+    ious = np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float64)
     if ious.size == 0:
         return ious
 
     ious = bbox_ious(
-        np.ascontiguousarray(atlbrs, dtype=np.float),
-        np.ascontiguousarray(btlbrs, dtype=np.float)
+        np.ascontiguousarray(atlbrs, dtype=np.float64),
+        np.ascontiguousarray(btlbrs, dtype=np.float64)
     )
 
     return ious
@@ -118,13 +131,13 @@ def embedding_distance(tracks, detections, metric='cosine'):
     :return: cost_matrix np.ndarray
     """
 
-    cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float)
+    cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float64)
     if cost_matrix.size == 0:
         return cost_matrix
-    det_features = np.asarray([track.curr_feat for track in detections], dtype=np.float)
+    det_features = np.asarray([track.curr_feat for track in detections], dtype=np.float64)
     #for i, track in enumerate(tracks):
         #cost_matrix[i, :] = np.maximum(0.0, cdist(track.smooth_feat.reshape(1,-1), det_features, metric))
-    track_features = np.asarray([track.smooth_feat for track in tracks], dtype=np.float)
+    track_features = np.asarray([track.smooth_feat for track in tracks], dtype=np.float64)
     cost_matrix = np.maximum(0.0, cdist(track_features, det_features, metric))  # Nomalized features
     return cost_matrix
 
@@ -179,3 +192,47 @@ def fuse_score(cost_matrix, detections):
     fuse_sim = iou_sim * det_scores
     fuse_cost = 1 - fuse_sim
     return fuse_cost
+
+def extract_features(model, detections, frame):
+    crops = []
+    for det in detections:
+        x1, y1, x2, y2 = map(int, det.tlbr)  # detection box
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:  # invalid crop
+            continue
+        crops.append(preprocess(crop))
+
+    if len(crops) == 0:
+        return np.zeros((0, 128))
+
+    crops = torch.stack(crops).to("cuda") if torch.cuda.is_available() else torch.stack(crops)
+    with torch.no_grad():
+        features = model(crops)
+    return features.cpu().numpy()
+
+def embedding_distance_feat(tracks, det_features):
+    if len(tracks) == 0 or len(det_features) == 0:
+        return np.zeros((len(tracks), len(det_features)))
+
+    track_features = np.array([t.smooth_feat for t in tracks])
+    # Normalize
+    track_features = track_features / np.linalg.norm(track_features, axis=1, keepdims=True)
+    det_features = det_features / np.linalg.norm(det_features, axis=1, keepdims=True)
+
+    cost_matrix = 1. - np.dot(track_features, det_features.T)  # cosine distance
+    return cost_matrix
+
+def combined_cost(tracks, detections, frame, reid_model, alpha=0.3):
+    # IoU cost
+    iou_cost = iou_distance(tracks, detections)
+
+    # Extract features for detections
+    det_features = extract_features(reid_model, detections, frame)
+
+    # Appearance cost
+    app_cost = embedding_distance_feat(tracks, det_features)
+
+    # Weighted cost
+    return alpha * iou_cost + (1 - alpha) * app_cost
