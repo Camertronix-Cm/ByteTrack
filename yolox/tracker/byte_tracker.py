@@ -25,7 +25,7 @@ def load_reid_model():
 
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
-    def __init__(self, tlwh, score, reid_model=None, frame=None):
+    def __init__(self, tlwh, score, cls, mask, reid_model=None, frame=None):
 
         # wait activate
         self._tlwh = np.asarray(tlwh, dtype=np.float64)
@@ -37,6 +37,8 @@ class STrack(BaseTrack):
         self.tracklet_len = 0
         self.smooth_feat = None
         self.features = None
+        self.cls = cls
+        self.mask = mask
 
         if reid_model is not None and frame is not None:
             # extract appearance feature at init
@@ -89,6 +91,7 @@ class STrack(BaseTrack):
         if new_id:
             self.track_id = self.next_id()
         self.score = new_track.score
+        self.mask = new_track.mask
 
     def update(self, new_track, frame_id):
         """
@@ -108,6 +111,7 @@ class STrack(BaseTrack):
         self.is_activated = True
 
         self.score = new_track.score
+        self.mask = new_track.mask
 
         if new_track.feature is not None:
             if self.smooth_feat is None:
@@ -187,20 +191,29 @@ class BYTETracker(object):
         self.reid_model = load_reid_model()
 
 
-    def update(self, frame, output_results, img_info, img_size):
+    def update(self, frame, output_results, masks, img_info, img_size):
         self.frame_id += 1
         activated_starcks = []
         refind_stracks = []
         lost_stracks = []
         removed_stracks = []
 
-        if output_results.shape[1] == 5:
+        if output_results.shape[1] == 6:
             scores = output_results[:, 4]
             bboxes = output_results[:, :4]
+            classes = output_results[:, 5]
+
+        # elif output_results.shape[1] == 7:
+        #     scores = output_results[:, 4]
+        #     bboxes = output_results[:, :4]
+        #     classes = output_results[:, 5]
+        #     contours = output_results[:, 6]
         else:
             output_results = output_results.cpu().numpy()
             scores = output_results[:, 4] * output_results[:, 5]
             bboxes = output_results[:, :4]  # x1y1x2y2
+            classes = [None]*len(scores)
+            # contours = [None]*len(scores)
         img_h, img_w = img_info[0], img_info[1]
         scale = min(img_size[0] / float(img_h), img_size[1] / float(img_w))
         bboxes /= scale
@@ -214,11 +227,15 @@ class BYTETracker(object):
         dets = bboxes[remain_inds]
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
+        classes_keep = classes[remain_inds]
+        classes_second = classes[inds_second]
+        contour_keep = [masks[i] for i in range(len(masks)) if remain_inds[i]]
+        contour_second =[masks[i] for i in range(len(masks)) if inds_second[i]]
 
         if len(dets) > 0:
             '''Detections'''
-            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, reid_model=self.reid_model, frame=frame) 
-                          for (tlbr, s) in zip(dets, scores_keep)]
+            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, cls, mask, reid_model=self.reid_model, frame=frame) 
+                          for (tlbr, s, cls, mask) in zip(dets, scores_keep, classes_keep, contour_keep)]
         else:
             detections = []
 
@@ -236,7 +253,7 @@ class BYTETracker(object):
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
         # dists = matching.iou_distance(strack_pool, detections)
-        dists = matching.combined_cost(strack_pool, detections, frame, self.reid_model, alpha=0.5)
+        dists = matching.combined_cost(strack_pool, detections, frame, self.reid_model)
 
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
@@ -257,13 +274,13 @@ class BYTETracker(object):
         # association the untrack to the low score detections
         if len(dets_second) > 0:
             '''Detections'''
-            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s, reid_model=self.reid_model, frame=frame) 
-                                 for (tlbr, s) in zip(dets_second, scores_second)]
+            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s, cls, mask, reid_model=self.reid_model, frame=frame) 
+                                 for (tlbr, s, cls, mask) in zip(dets_second, scores_second, classes_second, contour_second )]
         else:
             detections_second = []
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         # dists = matching.iou_distance(r_tracked_stracks, detections_second)
-        dists = matching.combined_cost(r_tracked_stracks, detections_second, frame, self.reid_model, alpha=0.5)
+        dists = matching.combined_cost(r_tracked_stracks, detections_second, frame, self.reid_model)
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
@@ -284,7 +301,7 @@ class BYTETracker(object):
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
         detections = [detections[i] for i in u_detection]
         # dists = matching.iou_distance(unconfirmed, detections)
-        dists = matching.combined_cost(unconfirmed, detections, frame, self.reid_model, alpha=0.5)
+        dists = matching.combined_cost(unconfirmed, detections, frame, self.reid_model)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
@@ -353,7 +370,7 @@ def sub_stracks(tlista, tlistb):
 
 def remove_duplicate_stracks(frame, stracksa, stracksb, reid_model):
     # pdist = matching.iou_distance(stracksa, stracksb)
-    pdist = matching.combined_cost(stracksa, stracksb, frame,reid_model, alpha=0.5)
+    pdist = matching.combined_cost(stracksa, stracksb, frame,reid_model)
 
     pairs = np.where(pdist < 0.15)
     dupa, dupb = list(), list()
