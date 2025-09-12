@@ -234,5 +234,19 @@ def combined_cost(tracks, detections, frame, reid_model, alpha=0.3):
     # Appearance cost
     app_cost = embedding_distance_feat(tracks, det_features)
 
+    # If shapes mismatch, pad to same size
+    if iou_cost.shape != app_cost.shape:
+        print(f"[Warning] Shape mismatch: iou {iou_cost.shape}, reid {app_cost.shape}")
+        max_tracks = max(iou_cost.shape[0], app_cost.shape[0])
+        max_dets   = max(iou_cost.shape[1], app_cost.shape[1])
+
+        padded_iou = np.zeros((max_tracks, max_dets))
+        padded_reid = np.zeros((max_tracks, max_dets))
+
+        padded_iou[:iou_cost.shape[0], :iou_cost.shape[1]] = iou_cost
+        padded_reid[:app_cost.shape[0], :app_cost.shape[1]] = app_cost
+
+        iou_cost, app_cost = padded_iou, padded_reid
+
     # Weighted cost
     return alpha * iou_cost + (1 - alpha) * app_cost
