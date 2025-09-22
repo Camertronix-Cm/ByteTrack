@@ -224,7 +224,7 @@ def embedding_distance_feat(tracks, det_features):
     cost_matrix = 1. - np.dot(track_features, det_features.T)  # cosine distance
     return cost_matrix
 
-def combined_cost(tracks, detections, frame, reid_model, alpha=0.3):
+def combined_cost(tracks, detections, frame, reid_model, alpha=0.4):
     # IoU cost
     iou_cost = iou_distance(tracks, detections)
 

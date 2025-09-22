@@ -39,6 +39,7 @@ class STrack(BaseTrack):
         self.features = None
         self.cls = cls
         self.mask = mask
+        self.bbox = self.tlwh_to_tlbr(tlwh).copy()
 
         if reid_model is not None and frame is not None:
             # extract appearance feature at init
@@ -92,6 +93,7 @@ class STrack(BaseTrack):
             self.track_id = self.next_id()
         self.score = new_track.score
         self.mask = new_track.mask
+        self.bbox = new_track.bbox
 
     def update(self, new_track, frame_id):
         """
@@ -107,18 +109,20 @@ class STrack(BaseTrack):
         new_tlwh = new_track.tlwh
         self.mean, self.covariance = self.kalman_filter.update(
             self.mean, self.covariance, self.tlwh_to_xyah(new_tlwh))
-        self.state = TrackState.Tracked
-        self.is_activated = True
 
         self.score = new_track.score
         self.mask = new_track.mask
+        self.bbox = new_track.bbox
 
         if new_track.feature is not None:
             if self.smooth_feat is None:
                 self.smooth_feat = new_track.feature
             else:
-                self.smooth_feat = 0.9 * self.smooth_feat + 0.1 * new_track.feature
+                if self.state == TrackState.Tracked:
+                    self.smooth_feat = 0.1 * self.smooth_feat + 0.9 * new_track.feature
         
+        self.state = TrackState.Tracked
+        self.is_activated = True
 
     @property
     # @jit(nopython=True)
