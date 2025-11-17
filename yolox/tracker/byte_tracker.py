@@ -118,8 +118,8 @@ class STrack(BaseTrack):
             if self.smooth_feat is None:
                 self.smooth_feat = new_track.feature
             else:
-                if self.state == TrackState.Tracked:
-                    self.smooth_feat = 0.1 * self.smooth_feat + 0.9 * new_track.feature
+                # if self.state == TrackState.Tracked:
+                self.smooth_feat = 0.5 * self.smooth_feat + 0.5 * new_track.feature
         
         self.state = TrackState.Tracked
         self.is_activated = True
