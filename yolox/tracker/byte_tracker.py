@@ -180,7 +180,7 @@ class STrack(BaseTrack):
 
 
 class BYTETracker(object):
-    def __init__(self, args, frame_rate=30):
+    def __init__(self, args, frame_rate=30, track_buffer= 5):
         self.tracked_stracks = []  # type: list[STrack]
         self.lost_stracks = []  # type: list[STrack]
         self.removed_stracks = []  # type: list[STrack]
@@ -188,8 +188,9 @@ class BYTETracker(object):
         self.frame_id = 0
         self.args = args
         #self.det_thresh = args.track_thresh
+        self.track_buffer = track_buffer
         self.det_thresh = args.track_thresh + 0.1
-        self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
+        self.buffer_size = int(frame_rate / 30.0 * self.track_buffer)
         self.max_time_lost = self.buffer_size
         self.kalman_filter = KalmanFilter()
         self.reid_model = load_reid_model()
