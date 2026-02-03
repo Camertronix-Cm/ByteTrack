@@ -19,7 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, models, transforms
 from dataloader import CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, UnNormalizer, Normalizer, RGB_MEAN, RGB_STD
 from scipy.optimize import linear_sum_assignment
-from tracker import BYTETracker
+from src.fall_prevention.tracker import BYTETracker
 
 
 def write_results(filename, results):

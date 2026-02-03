@@ -45,7 +45,7 @@ import shutil
 
 from detectron2.structures import Instances
 
-from tracker import BYTETracker
+from src.fall_prevention.tracker import BYTETracker
 
 np.random.seed(2020)
 

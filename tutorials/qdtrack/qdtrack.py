@@ -5,7 +5,7 @@ from mmdet.models import TwoStageDetector
 from qdtrack.core import track2result
 from ..builder import MODELS, build_tracker
 from qdtrack.core import imshow_tracks, restore_result
-from tracker import BYTETracker
+from src.fall_prevention.tracker import BYTETracker
 
 
 @MODELS.register_module()
