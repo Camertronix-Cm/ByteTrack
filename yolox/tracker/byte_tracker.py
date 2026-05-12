@@ -3,6 +3,7 @@ from collections import deque
 import os
 import os.path as osp
 import copy
+import logging
 import torch
 import torch.nn.functional as F
 
@@ -14,14 +15,25 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 
+logger = logging.getLogger(__name__)
+
 # Load a pretrained ReID model (e.g., OSNet_x0_25)
 def load_reid_model():
-    import torchreid
-    model = torchreid.models.build_model(
-        name='osnet_x0_25', num_classes=1000, pretrained=True
-    )
-    model.eval().to("cuda") if torch.cuda.is_available() else model.eval()
-    return model
+    try:
+        import torchreid
+    except ModuleNotFoundError:
+        logger.warning("torchreid is not installed; ByteTrack will use IoU-only matching")
+        return None
+
+    try:
+        model = torchreid.models.build_model(
+            name='osnet_x0_25', num_classes=1000, pretrained=True
+        )
+        model.eval().to("cuda") if torch.cuda.is_available() else model.eval()
+        return model
+    except Exception:
+        logger.exception("Failed to load ReID model; ByteTrack will use IoU-only matching")
+        return None
 
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
@@ -36,6 +48,7 @@ class STrack(BaseTrack):
         self.score = score
         self.tracklet_len = 0
         self.smooth_feat = None
+        self.feature = None
         self.features = None
         self.cls = cls
         self.mask = mask

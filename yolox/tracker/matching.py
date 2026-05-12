@@ -194,6 +194,9 @@ def fuse_score(cost_matrix, detections):
     return fuse_cost
 
 def extract_features(model, detections, frame):
+    if model is None or frame is None:
+        return None
+
     crops = []
     for det in detections:
         x1, y1, x2, y2 = map(int, det.tlbr)  # detection box
@@ -204,8 +207,8 @@ def extract_features(model, detections, frame):
             continue
         crops.append(preprocess(crop))
 
-    if len(crops) == 0:
-        return np.zeros((0, 128))
+    if len(crops) != len(detections):
+        return None
 
     crops = torch.stack(crops).to("cuda") if torch.cuda.is_available() else torch.stack(crops)
     with torch.no_grad():
@@ -215,6 +218,9 @@ def extract_features(model, detections, frame):
 def embedding_distance_feat(tracks, det_features):
     if len(tracks) == 0 or len(det_features) == 0:
         return np.zeros((len(tracks), len(det_features)))
+
+    if any(t.smooth_feat is None for t in tracks):
+        return None
 
     track_features = np.array([t.smooth_feat for t in tracks])
     # Normalize
@@ -230,9 +236,13 @@ def combined_cost(tracks, detections, frame, reid_model, alpha=0.4):
 
     # Extract features for detections
     det_features = extract_features(reid_model, detections, frame)
+    if det_features is None:
+        return iou_cost
 
     # Appearance cost
     app_cost = embedding_distance_feat(tracks, det_features)
+    if app_cost is None:
+        return iou_cost
 
     # If shapes mismatch, pad to same size
     if iou_cost.shape != app_cost.shape:
